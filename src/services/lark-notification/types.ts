@@ -182,3 +182,221 @@ export interface TaskLog {
 	message: string
 	metadata?: Record<string, unknown>
 }
+
+// ============================================
+// 阶段二：事件系统集成类型定义
+// ============================================
+
+/**
+ * 任务通知事件类型枚举
+ * 用于标识不同的任务生命周期事件
+ */
+export enum TaskNotificationEventType {
+	/** 任务开始 */
+	TASK_STARTED = "task_started",
+	/** 任务进度更新 */
+	TASK_PROGRESS = "task_progress",
+	/** 工具调用 */
+	TASK_TOOL_USE = "task_tool_use",
+	/** 任务完成 */
+	TASK_COMPLETED = "task_completed",
+	/** 任务失败 */
+	TASK_FAILED = "task_failed",
+	/** 任务取消 */
+	TASK_CANCELLED = "task_cancelled",
+	/** 任务暂停 */
+	TASK_PAUSED = "task_paused",
+	/** 任务恢复 */
+	TASK_RESUMED = "task_resumed",
+	/** Token 使用更新 */
+	TASK_TOKEN_UPDATED = "task_token_updated",
+}
+
+/**
+ * 任务事件数据接口
+ * 包含事件的基本信息
+ */
+export interface TaskEventData {
+	/** 事件类型 */
+	event: TaskNotificationEventType
+	/** 任务 ID */
+	taskId: string
+	/** 事件时间戳 */
+	timestamp: number
+	/** 附加数据 */
+	data?: Record<string, unknown>
+}
+
+/**
+ * 任务开始事件数据
+ */
+export interface TaskStartedEventData extends TaskEventData {
+	event: TaskNotificationEventType.TASK_STARTED
+	data: {
+		/** 任务名称/描述 */
+		taskName: string
+		/** 任务模式 */
+		mode?: string
+		/** 父任务 ID（如果是子任务） */
+		parentTaskId?: string
+	}
+}
+
+/**
+ * 任务进度事件数据
+ */
+export interface TaskProgressEventData extends TaskEventData {
+	event: TaskNotificationEventType.TASK_PROGRESS
+	data: {
+		/** 进度百分比 (0-100) */
+		progress?: number
+		/** 当前步骤描述 */
+		currentStep?: string
+		/** 消息内容 */
+		message?: string
+	}
+}
+
+/**
+ * 工具调用事件数据
+ */
+export interface TaskToolUseEventData extends TaskEventData {
+	event: TaskNotificationEventType.TASK_TOOL_USE
+	data: {
+		/** 工具名称 */
+		toolName: string
+		/** 工具状态 */
+		status: "started" | "completed" | "failed"
+		/** 工具输入参数 */
+		input?: Record<string, unknown>
+		/** 工具输出 */
+		output?: string
+		/** 错误信息 */
+		error?: string
+	}
+}
+
+/**
+ * 任务完成事件数据
+ */
+export interface TaskCompletedEventData extends TaskEventData {
+	event: TaskNotificationEventType.TASK_COMPLETED
+	data: {
+		/** 完成结果摘要 */
+		result?: string
+		/** Token 使用统计 */
+		tokenUsage?: {
+			inputTokens: number
+			outputTokens: number
+			totalTokens: number
+		}
+		/** 工具使用统计 */
+		toolUsage?: Record<string, number>
+		/** 总耗时（毫秒） */
+		duration?: number
+	}
+}
+
+/**
+ * 任务失败事件数据
+ */
+export interface TaskFailedEventData extends TaskEventData {
+	event: TaskNotificationEventType.TASK_FAILED
+	data: {
+		/** 错误信息 */
+		error: string
+		/** 错误类型 */
+		errorType?: string
+		/** 失败时的步骤 */
+		failedStep?: string
+	}
+}
+
+/**
+ * 任务取消事件数据
+ */
+export interface TaskCancelledEventData extends TaskEventData {
+	event: TaskNotificationEventType.TASK_CANCELLED
+	data: {
+		/** 取消原因 */
+		reason?: string
+		/** 取消时的进度 */
+		progress?: number
+	}
+}
+
+/**
+ * Token 使用更新事件数据
+ */
+export interface TaskTokenUpdatedEventData extends TaskEventData {
+	event: TaskNotificationEventType.TASK_TOKEN_UPDATED
+	data: {
+		/** 输入 Token 数 */
+		inputTokens: number
+		/** 输出 Token 数 */
+		outputTokens: number
+		/** 总 Token 数 */
+		totalTokens: number
+		/** 缓存读取 Token 数 */
+		cacheReadTokens?: number
+		/** 缓存写入 Token 数 */
+		cacheWriteTokens?: number
+		/** 预估费用 */
+		estimatedCost?: number
+	}
+}
+
+/**
+ * 所有任务事件数据的联合类型
+ */
+export type AnyTaskEventData =
+	| TaskStartedEventData
+	| TaskProgressEventData
+	| TaskToolUseEventData
+	| TaskCompletedEventData
+	| TaskFailedEventData
+	| TaskCancelledEventData
+	| TaskTokenUpdatedEventData
+
+/**
+ * 事件监听器回调函数类型
+ */
+export type TaskEventListener = (eventData: AnyTaskEventData) => void | Promise<void>
+
+/**
+ * 事件过滤器配置
+ */
+export interface TaskEventFilterConfig {
+	/** 要监听的事件类型列表，为空则监听所有 */
+	eventTypes?: TaskNotificationEventType[]
+	/** 要监听的任务 ID 列表，为空则监听所有 */
+	taskIds?: string[]
+	/** 是否包含子任务事件 */
+	includeSubtasks?: boolean
+}
+
+/**
+ * 节流配置
+ */
+export interface ThrottleConfig {
+	/** 是否启用节流 */
+	enabled: boolean
+	/** 节流间隔（毫秒） */
+	intervalMs: number
+	/** 要节流的事件类型 */
+	eventTypes?: TaskNotificationEventType[]
+}
+
+/**
+ * 任务通知适配器配置
+ */
+export interface TaskNotificationAdapterConfig {
+	/** 是否启用 */
+	enabled: boolean
+	/** 事件过滤器 */
+	filter?: TaskEventFilterConfig
+	/** 节流配置 */
+	throttle?: ThrottleConfig
+	/** 是否自动发送通知 */
+	autoNotify?: boolean
+}

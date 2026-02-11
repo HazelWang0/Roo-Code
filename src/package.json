@@ -412,6 +412,45 @@
 					"default": false,
 					"description": "%settings.debug.description%"
 				},
+				"roo-cline.larkNotification.enabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable Lark/Feishu notification for task status"
+				},
+				"roo-cline.larkNotification.webhookUrl": {
+					"type": "string",
+					"default": "",
+					"description": "Lark/Feishu webhook URL for notifications (used when useMcp is false)"
+				},
+				"roo-cline.larkNotification.useMcp": {
+					"type": "boolean",
+					"default": true,
+					"description": "Use MCP server for Lark notifications instead of direct webhook"
+				},
+				"roo-cline.larkNotification.mcpServerName": {
+					"type": "string",
+					"default": "task-manager",
+					"description": "MCP server name for Lark notifications"
+				},
+				"roo-cline.larkNotification.events": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"enum": [
+							"task_started",
+							"task_progress",
+							"task_completed",
+							"task_failed",
+							"task_cancelled"
+						]
+					},
+					"default": [
+						"task_started",
+						"task_completed",
+						"task_failed"
+					],
+					"description": "Events to notify via Lark"
+				},
 				"roo-cline.debugProxy.enabled": {
 					"type": "boolean",
 					"default": false,

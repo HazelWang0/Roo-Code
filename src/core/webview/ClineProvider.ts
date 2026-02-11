@@ -76,6 +76,7 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
+import { TaskEventListener, LarkNotificationService, LarkConfigManager } from "../../services/lark-notification"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
@@ -215,6 +216,13 @@ export class ClineProvider
 		this.skillsManager.initialize().catch((error) => {
 			this.log(`Failed to initialize Skills Manager: ${error}`)
 		})
+
+		// Initialize Lark Notification Service (Phase 3: Config Management Integration)
+		LarkNotificationService.getInstance()
+			.initialize()
+			.catch((error) => {
+				this.log(`Failed to initialize Lark Notification Service: ${error}`)
+			})
 
 		this.marketplaceManager = new MarketplaceManager(this.context, this.customModesManager)
 
@@ -433,6 +441,15 @@ export class ClineProvider
 		// Perform special setup provider specific tasks.
 		await this.performPreparationTasks(task)
 
+		// 注册任务到飞书通知事件监听器（阶段二集成）
+		try {
+			const taskEventListener = TaskEventListener.getInstance()
+			taskEventListener.registerTask(task)
+		} catch (error) {
+			// 飞书通知注册失败不应影响主流程
+			this.log(`[addClineToStack] Failed to register task for Lark notification: ${error}`)
+		}
+
 		// Ensure getState() resolves correctly.
 		const state = await this.getState()
 
@@ -493,6 +510,14 @@ export class ClineProvider
 			if (cleanupFunctions) {
 				cleanupFunctions.forEach((cleanup) => cleanup())
 				this.taskEventListeners.delete(task)
+			}
+
+			// 从飞书通知事件监听器解除注册（阶段二集成）
+			try {
+				const taskEventListener = TaskEventListener.getInstance()
+				taskEventListener.unregisterTask(childTaskId)
+			} catch (error) {
+				this.log(`[removeClineFromStack] Failed to unregister task from Lark notification: ${error}`)
 			}
 
 			// Make sure no reference kept, once promises end it will be

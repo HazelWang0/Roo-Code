@@ -15,6 +15,7 @@ import type {
 	TaskLog,
 	LarkCardAction,
 } from "./types"
+import { LarkConfigManager } from "./LarkConfigManager"
 
 // 默认配置
 const DEFAULT_CONFIG: LarkNotificationConfig = {
@@ -38,6 +39,7 @@ export class LarkNotificationService {
 	private isInitialized: boolean = false
 	private taskLogs: Map<string, TaskLog[]> = new Map()
 	private eventListeners: Map<string, Set<EventListener>> = new Map()
+	private configManagerSubscription?: { dispose: () => void }
 
 	// MCP 工具调用函数（由外部注入）
 	private mcpToolCaller?: (serverName: string, toolName: string, args: Record<string, unknown>) => Promise<unknown>
@@ -62,19 +64,58 @@ export class LarkNotificationService {
 	public static resetInstance(): void {
 		if (LarkNotificationService.instance) {
 			LarkNotificationService.instance.removeAllListeners()
+			LarkNotificationService.instance.configManagerSubscription?.dispose()
 			LarkNotificationService.instance = null
 		}
 	}
 
 	/**
 	 * 初始化服务
+	 * @param config 可选的配置覆盖
+	 * @param useConfigManager 是否使用配置管理器（默认 true）
 	 */
-	public async initialize(config?: Partial<LarkNotificationConfig>): Promise<void> {
+	public async initialize(config?: Partial<LarkNotificationConfig>, useConfigManager: boolean = true): Promise<void> {
+		if (useConfigManager) {
+			// 从配置管理器获取配置
+			this.syncFromConfigManager()
+			// 订阅配置变化
+			this.subscribeToConfigChanges()
+		}
+
 		if (config) {
 			this.config = { ...this.config, ...config }
 		}
 		this.isInitialized = true
 		this.log("info", "LarkNotificationService initialized", { config: this.config })
+	}
+
+	/**
+	 * 从配置管理器同步配置
+	 */
+	public syncFromConfigManager(): void {
+		try {
+			const configManager = LarkConfigManager.getInstance()
+			const managerConfig = configManager.getConfig()
+			this.config = { ...this.config, ...managerConfig }
+			this.log("debug", "Config synced from ConfigManager", { config: this.config })
+		} catch (error) {
+			this.log("warn", "Failed to sync config from ConfigManager", { error })
+		}
+	}
+
+	/**
+	 * 订阅配置管理器的变化
+	 */
+	private subscribeToConfigChanges(): void {
+		try {
+			const configManager = LarkConfigManager.getInstance()
+			this.configManagerSubscription = configManager.onConfigChange((newConfig) => {
+				this.config = { ...this.config, ...newConfig }
+				this.log("info", "Config updated from ConfigManager", { config: this.config })
+			})
+		} catch (error) {
+			this.log("warn", "Failed to subscribe to config changes", { error })
+		}
 	}
 
 	/**

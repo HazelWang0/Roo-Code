@@ -239,6 +239,20 @@ export const globalSettingsSchema = z.object({
 	 * Tools in this list will be excluded from prompt generation and rejected at execution time.
 	 */
 	disabledTools: z.array(toolNamesSchema).optional(),
+
+	/**
+	 * Lark/Feishu notification settings
+	 */
+	/** Whether Lark notification is enabled */
+	larkNotificationEnabled: z.boolean().optional(),
+	/** Lark webhook URL for direct notifications (when not using MCP) */
+	larkNotificationWebhookUrl: z.string().optional(),
+	/** Whether to use MCP server for Lark notifications */
+	larkNotificationUseMcp: z.boolean().optional(),
+	/** MCP server name for Lark notifications */
+	larkNotificationMcpServerName: z.string().optional(),
+	/** Events to notify via Lark */
+	larkNotificationEvents: z.array(z.string()).optional(),
 })
 
 export type GlobalSettings = z.infer<typeof globalSettingsSchema>
@@ -391,6 +405,13 @@ export const EVALS_SETTINGS: RooCodeSettings = {
 	mode: "code", // "architect",
 
 	customModes: [],
+
+	// Lark notification defaults
+	larkNotificationEnabled: false,
+	larkNotificationWebhookUrl: "",
+	larkNotificationUseMcp: true,
+	larkNotificationMcpServerName: "task-manager",
+	larkNotificationEvents: ["task_started", "task_completed", "task_failed"],
 }
 
 export const EVALS_TIMEOUT = 5 * 60 * 1_000
