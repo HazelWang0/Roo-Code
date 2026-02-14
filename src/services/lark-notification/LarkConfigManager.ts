@@ -4,7 +4,7 @@
  */
 
 import * as vscode from "vscode"
-import { LarkNotificationConfig, TaskNotificationEventType } from "./types"
+import { LarkNotificationConfig, LarkBotType, TaskNotificationEventType } from "./types"
 
 /**
  * VSCode 配置键名常量
@@ -12,7 +12,11 @@ import { LarkNotificationConfig, TaskNotificationEventType } from "./types"
 const CONFIG_SECTION = "roo-cline"
 const CONFIG_KEYS = {
 	enabled: "larkNotification.enabled",
+	botType: "larkNotification.botType",
 	webhookUrl: "larkNotification.webhookUrl",
+	appId: "larkNotification.appId",
+	appSecret: "larkNotification.appSecret",
+	chatId: "larkNotification.chatId",
 	useMcp: "larkNotification.useMcp",
 	mcpServerName: "larkNotification.mcpServerName",
 	events: "larkNotification.events",
@@ -86,10 +90,38 @@ export class LarkConfigManager implements vscode.Disposable {
 
 		const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
 
+		// 读取机器人类型
+		const botTypeStr = config.get<string>(CONFIG_KEYS.botType, "webhook")
+		const botType = botTypeStr === "app" ? LarkBotType.APP : LarkBotType.WEBHOOK
+
+		// 读取应用机器人配置
+		const appId = config.get<string>(CONFIG_KEYS.appId, "")
+		const appSecret = config.get<string>(CONFIG_KEYS.appSecret, "")
+		const chatId = config.get<string>(CONFIG_KEYS.chatId, "")
+
+		// 读取 enabled 和 useMcp
+		const enabled = config.get<boolean>(CONFIG_KEYS.enabled, false)
+		const useMcp = config.get<boolean>(CONFIG_KEYS.useMcp, false)
+
+		// 调试日志 - 输出到 Lark Notification Debug 通道
+		console.log(`[LarkConfigManager] getConfig() - enabled: ${enabled}, botType: ${botTypeStr}, useMcp: ${useMcp}`)
+		console.log(
+			`[LarkConfigManager] appId: ${appId ? "configured" : "empty"}, appSecret: ${appSecret ? "configured" : "empty"}, chatId: ${chatId ? "configured" : "empty"}`,
+		)
+
 		this.cachedConfig = {
-			enabled: config.get<boolean>(CONFIG_KEYS.enabled, false),
+			enabled,
+			botType,
 			webhookUrl: config.get<string>(CONFIG_KEYS.webhookUrl, ""),
-			useMcp: config.get<boolean>(CONFIG_KEYS.useMcp, true),
+			appBot:
+				appId && appSecret && chatId
+					? {
+							appId,
+							appSecret,
+							chatId,
+						}
+					: undefined,
+			useMcp,
 			mcpServerName: config.get<string>(CONFIG_KEYS.mcpServerName, "task-manager"),
 			retryCount: 3,
 			retryDelay: 1000,
@@ -138,16 +170,33 @@ export class LarkConfigManager implements vscode.Disposable {
 		const errors: string[] = []
 
 		if (config.enabled) {
-			if (!config.useMcp && !config.webhookUrl) {
-				errors.push("Webhook URL is required when not using MCP")
-			}
-
-			if (config.useMcp && !config.mcpServerName) {
-				errors.push("MCP server name is required when using MCP")
-			}
-
-			if (config.webhookUrl && !this.isValidUrl(config.webhookUrl)) {
-				errors.push("Invalid webhook URL format")
+			// 如果使用 MCP，只需要验证 MCP 服务器名称
+			if (config.useMcp) {
+				if (!config.mcpServerName) {
+					errors.push("MCP server name is required when using MCP")
+				}
+			} else {
+				// 不使用 MCP 时，根据机器人类型验证
+				if (config.botType === LarkBotType.APP) {
+					// 应用机器人需要 appId, appSecret, chatId
+					if (!config.appBot?.appId) {
+						errors.push("App ID is required for app bot")
+					}
+					if (!config.appBot?.appSecret) {
+						errors.push("App Secret is required for app bot")
+					}
+					if (!config.appBot?.chatId) {
+						errors.push("Chat ID is required for app bot")
+					}
+				} else {
+					// Webhook 机器人需要 webhookUrl
+					if (!config.webhookUrl) {
+						errors.push("Webhook URL is required for webhook bot")
+					}
+					if (config.webhookUrl && !this.isValidUrl(config.webhookUrl)) {
+						errors.push("Invalid webhook URL format")
+					}
+				}
 			}
 		}
 
@@ -167,8 +216,19 @@ export class LarkConfigManager implements vscode.Disposable {
 			await config.update(CONFIG_KEYS.enabled, updates.enabled, vscode.ConfigurationTarget.Global)
 		}
 
+		if (updates.botType !== undefined) {
+			const botTypeStr = updates.botType === LarkBotType.APP ? "app" : "webhook"
+			await config.update(CONFIG_KEYS.botType, botTypeStr, vscode.ConfigurationTarget.Global)
+		}
+
 		if (updates.webhookUrl !== undefined) {
 			await config.update(CONFIG_KEYS.webhookUrl, updates.webhookUrl, vscode.ConfigurationTarget.Global)
+		}
+
+		if (updates.appBot !== undefined) {
+			await config.update(CONFIG_KEYS.appId, updates.appBot.appId, vscode.ConfigurationTarget.Global)
+			await config.update(CONFIG_KEYS.appSecret, updates.appBot.appSecret, vscode.ConfigurationTarget.Global)
+			await config.update(CONFIG_KEYS.chatId, updates.appBot.chatId, vscode.ConfigurationTarget.Global)
 		}
 
 		if (updates.useMcp !== undefined) {

@@ -14,13 +14,39 @@ export enum TaskNotificationStatus {
 }
 
 /**
+ * 飞书机器人类型枚举
+ */
+export enum LarkBotType {
+	/** Webhook 机器人 - 简单，只需 URL */
+	WEBHOOK = "webhook",
+	/** 应用机器人 - 功能强大，需要 App ID/Secret/Chat ID */
+	APP = "app",
+}
+
+/**
+ * 飞书应用机器人配置
+ */
+export interface LarkAppBotConfig {
+	/** 应用 ID */
+	appId: string
+	/** 应用密钥 */
+	appSecret: string
+	/** 群聊 ID */
+	chatId: string
+}
+
+/**
  * 飞书通知配置接口
  */
 export interface LarkNotificationConfig {
 	/** 是否启用飞书通知 */
 	enabled: boolean
-	/** 飞书 Webhook URL（直接调用时使用） */
+	/** 机器人类型 */
+	botType?: LarkBotType
+	/** 飞书 Webhook URL（Webhook 机器人使用） */
 	webhookUrl?: string
+	/** 应用机器人配置 */
+	appBot?: LarkAppBotConfig
 	/** 是否通过 MCP 调用飞书服务 */
 	useMcp: boolean
 	/** MCP 服务器名称 */
@@ -29,6 +55,27 @@ export interface LarkNotificationConfig {
 	retryCount?: number
 	/** 重试延迟（毫秒） */
 	retryDelay?: number
+}
+
+/**
+ * 飞书应用机器人 Token 响应
+ */
+export interface LarkTenantAccessTokenResponse {
+	code: number
+	msg: string
+	tenant_access_token?: string
+	expire?: number
+}
+
+/**
+ * 飞书发送消息响应
+ */
+export interface LarkSendMessageResponse {
+	code: number
+	msg: string
+	data?: {
+		message_id?: string
+	}
 }
 
 /**

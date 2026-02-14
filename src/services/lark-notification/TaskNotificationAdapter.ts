@@ -8,6 +8,7 @@
  * - 自动将 Task 事件转换为飞书通知格式
  */
 
+import * as vscode from "vscode"
 import type { Task } from "../../core/task/Task"
 import { LarkNotificationService } from "./LarkNotificationService"
 import {
@@ -65,6 +66,7 @@ interface SimpleMessage {
  * 负责监听 Task 事件并转换为飞书通知
  */
 export class TaskNotificationAdapter {
+	private static outputChannel: vscode.OutputChannel | null = null
 	private task: Task | null = null
 	private config: TaskNotificationAdapterConfig
 	private notificationService: LarkNotificationService
@@ -78,6 +80,30 @@ export class TaskNotificationAdapter {
 	// 存储事件处理器引用，用于解绑 - 使用 any 类型避免复杂的类型推断
 	private boundHandlers: Map<string, (...args: any[]) => void> = new Map()
 
+	/**
+	 * 获取调试输出通道
+	 */
+	private static getOutputChannel(): vscode.OutputChannel {
+		if (!TaskNotificationAdapter.outputChannel) {
+			TaskNotificationAdapter.outputChannel = vscode.window.createOutputChannel("Lark Notification Debug")
+		}
+		return TaskNotificationAdapter.outputChannel
+	}
+
+	/**
+	 * 输出调试日志
+	 */
+	private log(message: string, data?: unknown): void {
+		const channel = TaskNotificationAdapter.getOutputChannel()
+		const timestamp = new Date().toISOString()
+		const taskId = this.task?.taskId || "no-task"
+		const logMessage = data
+			? `[${timestamp}] [TaskNotificationAdapter:${taskId}] ${message}: ${JSON.stringify(data, null, 2)}`
+			: `[${timestamp}] [TaskNotificationAdapter:${taskId}] ${message}`
+		channel.appendLine(logMessage)
+		console.log(logMessage)
+	}
+
 	constructor(config?: Partial<TaskNotificationAdapterConfig>) {
 		this.config = { ...DEFAULT_CONFIG, ...config }
 		this.notificationService = LarkNotificationService.getInstance()
@@ -87,7 +113,14 @@ export class TaskNotificationAdapter {
 	 * 附加到 Task 实例
 	 */
 	public attach(task: Task): void {
+		this.log("attach() called", {
+			taskId: task.taskId,
+			configEnabled: this.config.enabled,
+			autoNotify: this.config.autoNotify,
+		})
+
 		if (this.isAttached) {
+			this.log("Already attached, detaching first")
 			this.detach()
 		}
 
@@ -96,9 +129,11 @@ export class TaskNotificationAdapter {
 		this.isAttached = true
 
 		// 绑定事件处理器
+		this.log("Binding task events")
 		this.bindTaskEvents()
 
 		// 发送任务开始事件
+		this.log("Emitting task started event")
 		this.emitTaskStarted()
 	}
 
@@ -129,17 +164,27 @@ export class TaskNotificationAdapter {
 	 * 手动触发通知
 	 */
 	public async notify(eventData: AnyTaskEventData): Promise<void> {
+		this.log("notify() called", {
+			event: eventData.event,
+			taskId: eventData.taskId,
+			configEnabled: this.config.enabled,
+			autoNotify: this.config.autoNotify,
+		})
+
 		if (!this.config.enabled) {
+			this.log("notify() skipped - adapter disabled")
 			return
 		}
 
 		// 检查事件过滤
 		if (!this.shouldProcessEvent(eventData)) {
+			this.log("notify() skipped - event filtered out", { event: eventData.event })
 			return
 		}
 
 		// 检查节流
 		if (this.shouldThrottle(eventData.event)) {
+			this.log("notify() throttled", { event: eventData.event })
 			this.pendingEvents.set(eventData.event, eventData)
 			this.scheduleThrottledEvent(eventData.event)
 			return
@@ -149,11 +194,15 @@ export class TaskNotificationAdapter {
 		this.lastEventTime.set(eventData.event, Date.now())
 
 		// 触发本地监听器
+		this.log("Emitting to local listeners", { event: eventData.event })
 		await this.emitToListeners(eventData)
 
 		// 如果启用自动通知，发送到飞书
 		if (this.config.autoNotify) {
+			this.log("Auto-notify enabled, sending notification to Lark")
 			await this.sendNotification(eventData)
+		} else {
+			this.log("Auto-notify disabled, skipping Lark notification")
 		}
 	}
 
@@ -284,13 +333,23 @@ export class TaskNotificationAdapter {
 	private emitTaskStarted(): void {
 		if (!this.task) return
 
+		// 安全地获取 taskMode，避免在初始化前访问抛出异常
+		let mode: string | undefined
+		try {
+			// 尝试访问 taskMode getter，如果未初始化会抛出异常
+			mode = (this.task as any).taskMode
+		} catch {
+			// 如果 taskMode 未初始化，尝试获取内部 _taskMode 或使用默认值
+			mode = (this.task as any)._taskMode || "unknown"
+		}
+
 		const eventData: TaskStartedEventData = {
 			event: TaskNotificationEventType.TASK_STARTED,
 			taskId: this.task.taskId,
 			timestamp: Date.now(),
 			data: {
 				taskName: this.task.metadata?.task || "Unknown Task",
-				mode: (this.task as any).taskMode,
+				mode,
 				parentTaskId: this.task.parentTaskId,
 			},
 		}
@@ -554,33 +613,48 @@ export class TaskNotificationAdapter {
 	 * 发送通知到飞书
 	 */
 	private async sendNotification(eventData: AnyTaskEventData): Promise<void> {
+		this.log("sendNotification() called", {
+			event: eventData.event,
+			notificationServiceEnabled: this.notificationService.isEnabled(),
+			notificationServiceConfig: this.notificationService.getConfig(),
+		})
+
 		if (!this.notificationService.isEnabled()) {
+			this.log("sendNotification() skipped - notification service disabled")
 			return
 		}
 
 		try {
 			const notificationData = this.convertToNotificationData(eventData)
+			this.log("Converted notification data", notificationData)
 
 			switch (eventData.event) {
 				case TaskNotificationEventType.TASK_STARTED:
+					this.log("Calling notifyTaskCreated")
 					await this.notificationService.notifyTaskCreated(notificationData)
 					break
 				case TaskNotificationEventType.TASK_PROGRESS:
 				case TaskNotificationEventType.TASK_TOOL_USE:
 				case TaskNotificationEventType.TASK_TOKEN_UPDATED:
+					this.log("Calling notifyTaskProgress")
 					await this.notificationService.notifyTaskProgress(notificationData)
 					break
 				case TaskNotificationEventType.TASK_COMPLETED:
+					this.log("Calling notifyTaskCompleted")
 					await this.notificationService.notifyTaskCompleted(notificationData)
 					break
 				case TaskNotificationEventType.TASK_FAILED:
 				case TaskNotificationEventType.TASK_CANCELLED:
+					this.log("Calling notifyTaskFailed")
 					await this.notificationService.notifyTaskFailed(notificationData)
 					break
 				default:
+					this.log("Calling notifyTaskProgress (default)")
 					await this.notificationService.notifyTaskProgress(notificationData)
 			}
+			this.log("Notification sent successfully", { event: eventData.event })
 		} catch (error) {
+			this.log("sendNotification() failed", { error: String(error) })
 			console.error(`[TaskNotificationAdapter] Failed to send notification:`, error)
 		}
 	}

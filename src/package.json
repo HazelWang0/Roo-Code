@@ -1,8 +1,8 @@
 {
-	"name": "roo-cline",
-	"displayName": "%extension.displayName%",
+	"name": "roo-cline-lark",
+	"displayName": "Roo Code (飞书版)",
 	"description": "%extension.description%",
-	"publisher": "RooVeterinaryInc",
+	"publisher": "local",
 	"version": "3.47.3",
 	"icon": "assets/icons/icon.png",
 	"galleryBanner": {
@@ -54,17 +54,17 @@
 		"viewsContainers": {
 			"activitybar": [
 				{
-					"id": "roo-cline-ActivityBar",
+					"id": "roo-cline-lark-ActivityBar",
 					"title": "%views.activitybar.title%",
 					"icon": "assets/icons/icon.svg"
 				}
 			]
 		},
 		"views": {
-			"roo-cline-ActivityBar": [
+			"roo-cline-lark-ActivityBar": [
 				{
 					"type": "webview",
-					"id": "roo-cline.SidebarProvider",
+					"id": "roo-cline-lark.SidebarProvider",
 					"name": "%views.sidebar.name%"
 				}
 			]
@@ -417,15 +417,39 @@
 					"default": false,
 					"description": "Enable Lark/Feishu notification for task status"
 				},
+				"roo-cline.larkNotification.botType": {
+					"type": "string",
+					"enum": [
+						"webhook",
+						"app"
+					],
+					"default": "webhook",
+					"description": "Lark bot type: 'webhook' for simple webhook bot, 'app' for app bot with more features"
+				},
 				"roo-cline.larkNotification.webhookUrl": {
 					"type": "string",
 					"default": "",
-					"description": "Lark/Feishu webhook URL for notifications (used when useMcp is false)"
+					"description": "Lark/Feishu webhook URL for notifications (used when botType is 'webhook' and useMcp is false)"
+				},
+				"roo-cline.larkNotification.appId": {
+					"type": "string",
+					"default": "",
+					"description": "Lark App ID for app bot (used when botType is 'app')"
+				},
+				"roo-cline.larkNotification.appSecret": {
+					"type": "string",
+					"default": "",
+					"description": "Lark App Secret for app bot (used when botType is 'app'). This is sensitive information."
+				},
+				"roo-cline.larkNotification.chatId": {
+					"type": "string",
+					"default": "",
+					"description": "Lark Chat ID for app bot to send messages to (used when botType is 'app')"
 				},
 				"roo-cline.larkNotification.useMcp": {
 					"type": "boolean",
-					"default": true,
-					"description": "Use MCP server for Lark notifications instead of direct webhook"
+					"default": false,
+					"description": "Use MCP server for Lark notifications instead of direct API call"
 				},
 				"roo-cline.larkNotification.mcpServerName": {
 					"type": "string",

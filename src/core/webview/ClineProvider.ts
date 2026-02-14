@@ -442,13 +442,20 @@ export class ClineProvider
 		await this.performPreparationTasks(task)
 
 		// 注册任务到飞书通知事件监听器（阶段二集成）
-		try {
-			const taskEventListener = TaskEventListener.getInstance()
-			taskEventListener.registerTask(task)
-		} catch (error) {
-			// 飞书通知注册失败不应影响主流程
-			this.log(`[addClineToStack] Failed to register task for Lark notification: ${error}`)
-		}
+		// 需要等待 Task mode 初始化完成后再注册，避免访问未初始化的 taskMode
+		task.waitForModeInitialization()
+			.then(() => {
+				try {
+					const taskEventListener = TaskEventListener.getInstance()
+					taskEventListener.registerTask(task)
+				} catch (error) {
+					// 飞书通知注册失败不应影响主流程
+					this.log(`[addClineToStack] Failed to register task for Lark notification: ${error}`)
+				}
+			})
+			.catch((error) => {
+				this.log(`[addClineToStack] Failed to wait for task mode initialization: ${error}`)
+			})
 
 		// Ensure getState() resolves correctly.
 		const state = await this.getState()

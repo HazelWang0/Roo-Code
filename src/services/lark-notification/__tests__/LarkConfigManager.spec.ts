@@ -5,21 +5,53 @@
 
 import type { ConfigurationChangeEvent, Disposable, WorkspaceConfiguration } from "vscode"
 import { LarkConfigManager, getLarkConfigManager } from "../LarkConfigManager"
-import { TaskNotificationEventType } from "../types"
+import { TaskNotificationEventType, LarkBotType } from "../types"
+
+// 存储配置变化回调
+let configChangeCallback: ((e: ConfigurationChangeEvent) => void) | null = null
+
+// Mock 配置存储（在 vi.mock 外部，可以被测试访问）
+const mockConfig: Record<string, unknown> = {
+	"larkNotification.enabled": false,
+	"larkNotification.botType": "webhook",
+	"larkNotification.webhookUrl": "",
+	"larkNotification.appId": "",
+	"larkNotification.appSecret": "",
+	"larkNotification.chatId": "",
+	"larkNotification.useMcp": true,
+	"larkNotification.mcpServerName": "task-manager",
+	"larkNotification.events": ["task_started", "task_completed", "task_failed"],
+}
+
+// 辅助函数：触发配置变化
+const triggerConfigChange = (section: string) => {
+	if (configChangeCallback) {
+		configChangeCallback({
+			affectsConfiguration: (s: string) => s === section,
+		} as ConfigurationChangeEvent)
+	}
+}
+
+// 辅助函数：设置 mock 配置
+const setMockConfig = (key: string, value: unknown) => {
+	mockConfig[key] = value
+}
+
+// 辅助函数：重置 mock 配置
+const resetMockConfig = () => {
+	mockConfig["larkNotification.enabled"] = false
+	mockConfig["larkNotification.botType"] = "webhook"
+	mockConfig["larkNotification.webhookUrl"] = ""
+	mockConfig["larkNotification.appId"] = ""
+	mockConfig["larkNotification.appSecret"] = ""
+	mockConfig["larkNotification.chatId"] = ""
+	mockConfig["larkNotification.useMcp"] = true
+	mockConfig["larkNotification.mcpServerName"] = "task-manager"
+	mockConfig["larkNotification.events"] = ["task_started", "task_completed", "task_failed"]
+}
 
 // Mock vscode 模块
 vi.mock("vscode", () => {
-	// 存储配置变化回调
-	let configChangeCallback: ((e: ConfigurationChangeEvent) => void) | null = null
-
-	const mockConfig: Record<string, unknown> = {
-		"larkNotification.enabled": false,
-		"larkNotification.webhookUrl": "",
-		"larkNotification.useMcp": true,
-		"larkNotification.mcpServerName": "task-manager",
-		"larkNotification.events": ["task_started", "task_completed", "task_failed"],
-	}
-
 	return {
 		workspace: {
 			getConfiguration: vi.fn().mockImplementation(() => ({
@@ -41,34 +73,20 @@ vi.mock("vscode", () => {
 			Workspace: 2,
 			WorkspaceFolder: 3,
 		},
-		// 导出用于测试的辅助函数
-		__triggerConfigChange: (section: string) => {
-			if (configChangeCallback) {
-				configChangeCallback({
-					affectsConfiguration: (s: string) => s === section,
-				})
-			}
-		},
-		__setMockConfig: (key: string, value: unknown) => {
-			mockConfig[key] = value
-		},
-		__resetMockConfig: () => {
-			mockConfig["larkNotification.enabled"] = false
-			mockConfig["larkNotification.webhookUrl"] = ""
-			mockConfig["larkNotification.useMcp"] = true
-			mockConfig["larkNotification.mcpServerName"] = "task-manager"
-			mockConfig["larkNotification.events"] = ["task_started", "task_completed", "task_failed"]
-		},
 	}
 })
+
+// 导入 mocked vscode 用于断言
+import * as vscode from "vscode"
 
 describe("LarkConfigManager", () => {
 	beforeEach(() => {
 		// 重置单例实例
 		LarkConfigManager.destroyInstance()
 		// 重置 mock 配置
-		const vscode = require("vscode")
-		vscode.__resetMockConfig()
+		resetMockConfig()
+		// 清除 mock 调用记录
+		vi.clearAllMocks()
 	})
 
 	afterEach(() => {
@@ -105,7 +123,9 @@ describe("LarkConfigManager", () => {
 
 			expect(config).toEqual({
 				enabled: false,
+				botType: LarkBotType.WEBHOOK,
 				webhookUrl: "",
+				appBot: undefined,
 				useMcp: true,
 				mcpServerName: "task-manager",
 				retryCount: 3,
@@ -115,7 +135,6 @@ describe("LarkConfigManager", () => {
 
 		it("应该缓存配置", () => {
 			const manager = LarkConfigManager.getInstance()
-			const vscode = require("vscode")
 
 			// 第一次调用
 			manager.getConfig()
@@ -160,11 +179,11 @@ describe("LarkConfigManager", () => {
 			expect(result.errors).toHaveLength(0)
 		})
 
-		it("启用但未配置 webhook 且不使用 MCP 时应该验证失败", () => {
-			const vscode = require("vscode")
-			vscode.__setMockConfig("larkNotification.enabled", true)
-			vscode.__setMockConfig("larkNotification.useMcp", false)
-			vscode.__setMockConfig("larkNotification.webhookUrl", "")
+		it("启用 webhook 机器人但未配置 webhook URL 且不使用 MCP 时应该验证失败", () => {
+			setMockConfig("larkNotification.enabled", true)
+			setMockConfig("larkNotification.botType", "webhook")
+			setMockConfig("larkNotification.useMcp", false)
+			setMockConfig("larkNotification.webhookUrl", "")
 
 			// 需要重新创建实例以获取新配置
 			LarkConfigManager.destroyInstance()
@@ -172,14 +191,77 @@ describe("LarkConfigManager", () => {
 			const result = manager.validateConfig()
 
 			expect(result.valid).toBe(false)
-			expect(result.errors).toContain("Webhook URL is required when not using MCP")
+			expect(result.errors).toContain("Webhook URL is required for webhook bot")
+		})
+
+		it("启用应用机器人但未配置 appId 时应该验证失败", () => {
+			setMockConfig("larkNotification.enabled", true)
+			setMockConfig("larkNotification.botType", "app")
+			setMockConfig("larkNotification.useMcp", false)
+			setMockConfig("larkNotification.appId", "")
+			setMockConfig("larkNotification.appSecret", "test-secret")
+			setMockConfig("larkNotification.chatId", "test-chat-id")
+
+			LarkConfigManager.destroyInstance()
+			const manager = LarkConfigManager.getInstance()
+			const result = manager.validateConfig()
+
+			expect(result.valid).toBe(false)
+			expect(result.errors).toContain("App ID is required for app bot")
+		})
+
+		it("启用应用机器人但未配置 appSecret 时应该验证失败", () => {
+			setMockConfig("larkNotification.enabled", true)
+			setMockConfig("larkNotification.botType", "app")
+			setMockConfig("larkNotification.useMcp", false)
+			setMockConfig("larkNotification.appId", "test-app-id")
+			setMockConfig("larkNotification.appSecret", "")
+			setMockConfig("larkNotification.chatId", "test-chat-id")
+
+			LarkConfigManager.destroyInstance()
+			const manager = LarkConfigManager.getInstance()
+			const result = manager.validateConfig()
+
+			expect(result.valid).toBe(false)
+			expect(result.errors).toContain("App Secret is required for app bot")
+		})
+
+		it("启用应用机器人但未配置 chatId 时应该验证失败", () => {
+			setMockConfig("larkNotification.enabled", true)
+			setMockConfig("larkNotification.botType", "app")
+			setMockConfig("larkNotification.useMcp", false)
+			setMockConfig("larkNotification.appId", "test-app-id")
+			setMockConfig("larkNotification.appSecret", "test-secret")
+			setMockConfig("larkNotification.chatId", "")
+
+			LarkConfigManager.destroyInstance()
+			const manager = LarkConfigManager.getInstance()
+			const result = manager.validateConfig()
+
+			expect(result.valid).toBe(false)
+			expect(result.errors).toContain("Chat ID is required for app bot")
+		})
+
+		it("应用机器人配置完整时应该验证通过", () => {
+			setMockConfig("larkNotification.enabled", true)
+			setMockConfig("larkNotification.botType", "app")
+			setMockConfig("larkNotification.useMcp", false)
+			setMockConfig("larkNotification.appId", "test-app-id")
+			setMockConfig("larkNotification.appSecret", "test-secret")
+			setMockConfig("larkNotification.chatId", "test-chat-id")
+
+			LarkConfigManager.destroyInstance()
+			const manager = LarkConfigManager.getInstance()
+			const result = manager.validateConfig()
+
+			expect(result.valid).toBe(true)
+			expect(result.errors).toHaveLength(0)
 		})
 
 		it("启用 MCP 但未配置服务器名称时应该验证失败", () => {
-			const vscode = require("vscode")
-			vscode.__setMockConfig("larkNotification.enabled", true)
-			vscode.__setMockConfig("larkNotification.useMcp", true)
-			vscode.__setMockConfig("larkNotification.mcpServerName", "")
+			setMockConfig("larkNotification.enabled", true)
+			setMockConfig("larkNotification.useMcp", true)
+			setMockConfig("larkNotification.mcpServerName", "")
 
 			LarkConfigManager.destroyInstance()
 			const manager = LarkConfigManager.getInstance()
@@ -190,10 +272,9 @@ describe("LarkConfigManager", () => {
 		})
 
 		it("无效的 webhook URL 应该验证失败", () => {
-			const vscode = require("vscode")
-			vscode.__setMockConfig("larkNotification.enabled", true)
-			vscode.__setMockConfig("larkNotification.useMcp", false)
-			vscode.__setMockConfig("larkNotification.webhookUrl", "invalid-url")
+			setMockConfig("larkNotification.enabled", true)
+			setMockConfig("larkNotification.useMcp", false)
+			setMockConfig("larkNotification.webhookUrl", "invalid-url")
 
 			LarkConfigManager.destroyInstance()
 			const manager = LarkConfigManager.getInstance()
@@ -204,10 +285,9 @@ describe("LarkConfigManager", () => {
 		})
 
 		it("有效的 webhook URL 应该验证通过", () => {
-			const vscode = require("vscode")
-			vscode.__setMockConfig("larkNotification.enabled", true)
-			vscode.__setMockConfig("larkNotification.useMcp", false)
-			vscode.__setMockConfig("larkNotification.webhookUrl", "https://open.feishu.cn/webhook/xxx")
+			setMockConfig("larkNotification.enabled", true)
+			setMockConfig("larkNotification.useMcp", false)
+			setMockConfig("larkNotification.webhookUrl", "https://open.feishu.cn/webhook/xxx")
 
 			LarkConfigManager.destroyInstance()
 			const manager = LarkConfigManager.getInstance()
@@ -234,8 +314,7 @@ describe("LarkConfigManager", () => {
 			manager.onConfigChange(listener)
 
 			// 触发配置变化
-			const vscode = require("vscode")
-			vscode.__triggerConfigChange("roo-cline")
+			triggerConfigChange("roo-cline")
 
 			expect(listener).toHaveBeenCalled()
 		})
@@ -249,8 +328,7 @@ describe("LarkConfigManager", () => {
 			disposable.dispose()
 
 			// 再触发配置变化
-			const vscode = require("vscode")
-			vscode.__triggerConfigChange("roo-cline")
+			triggerConfigChange("roo-cline")
 
 			expect(listener).not.toHaveBeenCalled()
 		})
@@ -266,8 +344,7 @@ describe("LarkConfigManager", () => {
 			manager.onConfigChange(normalListener)
 
 			// 触发配置变化
-			const vscode = require("vscode")
-			vscode.__triggerConfigChange("roo-cline")
+			triggerConfigChange("roo-cline")
 
 			// 两个监听器都应该被调用
 			expect(errorListener).toHaveBeenCalled()
@@ -278,12 +355,11 @@ describe("LarkConfigManager", () => {
 	describe("配置更新", () => {
 		it("应该能更新配置", async () => {
 			const manager = LarkConfigManager.getInstance()
-			const vscode = require("vscode")
 			const mockUpdate = vi.fn().mockResolvedValue(undefined)
-			vscode.workspace.getConfiguration.mockReturnValue({
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 				get: vi.fn(),
 				update: mockUpdate,
-			})
+			} as unknown as WorkspaceConfiguration)
 
 			await manager.updateConfig({ enabled: true })
 
@@ -292,12 +368,11 @@ describe("LarkConfigManager", () => {
 
 		it("应该能更新启用的事件列表", async () => {
 			const manager = LarkConfigManager.getInstance()
-			const vscode = require("vscode")
 			const mockUpdate = vi.fn().mockResolvedValue(undefined)
-			vscode.workspace.getConfiguration.mockReturnValue({
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 				get: vi.fn(),
 				update: mockUpdate,
-			})
+			} as unknown as WorkspaceConfiguration)
 
 			await manager.updateEnabledEvents([
 				TaskNotificationEventType.TASK_STARTED,
@@ -317,8 +392,7 @@ describe("LarkConfigManager", () => {
 			manager.dispose()
 
 			// 触发配置变化，监听器不应该被调用
-			const vscode = require("vscode")
-			vscode.__triggerConfigChange("roo-cline")
+			triggerConfigChange("roo-cline")
 
 			expect(listener).not.toHaveBeenCalled()
 		})

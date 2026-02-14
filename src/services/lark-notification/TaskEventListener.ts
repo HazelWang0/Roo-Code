@@ -9,6 +9,7 @@
  * - 集成配置管理器，自动响应配置变化
  */
 
+import * as vscode from "vscode"
 import { TaskNotificationAdapter } from "./TaskNotificationAdapter"
 import { LarkNotificationService } from "./LarkNotificationService"
 import { LarkConfigManager } from "./LarkConfigManager"
@@ -41,6 +42,7 @@ type GlobalEventCallback = (taskId: string, eventData: AnyTaskEventData) => void
  */
 export class TaskEventListener {
 	private static instance: TaskEventListener | null = null
+	private static outputChannel: vscode.OutputChannel | null = null
 
 	private adapters: Map<string, TaskAdapterInfo> = new Map()
 	private globalListeners: Map<string, GlobalEventCallback[]> = new Map()
@@ -51,12 +53,58 @@ export class TaskEventListener {
 	private isEnabled: boolean = true
 	private enabledEvents: TaskNotificationEventType[] = []
 
+	/**
+	 * 获取调试输出通道
+	 */
+	private static getOutputChannel(): vscode.OutputChannel {
+		if (!TaskEventListener.outputChannel) {
+			TaskEventListener.outputChannel = vscode.window.createOutputChannel("Lark Notification Debug")
+		}
+		return TaskEventListener.outputChannel
+	}
+
+	/**
+	 * 输出调试日志
+	 */
+	private log(message: string, data?: unknown): void {
+		const channel = TaskEventListener.getOutputChannel()
+		const timestamp = new Date().toISOString()
+		const logMessage = data
+			? `[${timestamp}] [TaskEventListener] ${message}: ${JSON.stringify(data, null, 2)}`
+			: `[${timestamp}] [TaskEventListener] ${message}`
+		channel.appendLine(logMessage)
+		console.log(logMessage)
+	}
+
 	private constructor(config?: Partial<TaskNotificationAdapterConfig>) {
 		this.defaultConfig = config || {}
 		this.notificationService = LarkNotificationService.getInstance()
 		this.configManager = LarkConfigManager.getInstance()
+		this.log("TaskEventListener constructor called")
 		this.syncFromConfigManager()
 		this.subscribeToConfigChanges()
+		// 初始化 LarkNotificationService，确保配置从 ConfigManager 同步
+		this.initializeNotificationService()
+		this.log("TaskEventListener initialized", {
+			isEnabled: this.isEnabled,
+			enabledEvents: this.enabledEvents,
+			notificationServiceConfig: this.notificationService.getConfig(),
+		})
+	}
+
+	/**
+	 * 初始化通知服务
+	 * 确保 LarkNotificationService 从 ConfigManager 同步配置
+	 */
+	private initializeNotificationService(): void {
+		try {
+			// 调用 initialize 方法，使其从 ConfigManager 同步配置
+			this.notificationService.initialize().catch((error) => {
+				console.error("[TaskEventListener] Failed to initialize LarkNotificationService:", error)
+			})
+		} catch (error) {
+			console.error("[TaskEventListener] Error initializing LarkNotificationService:", error)
+		}
 	}
 
 	/**
@@ -146,9 +194,16 @@ export class TaskEventListener {
 	 */
 	public registerTask(task: Task, config?: Partial<TaskNotificationAdapterConfig>): TaskNotificationAdapter {
 		const taskId = task.taskId
+		this.log("registerTask called", {
+			taskId,
+			isEnabled: this.isEnabled,
+			enabledEvents: this.enabledEvents,
+			configEnabled: config?.enabled,
+		})
 
 		// 如果已存在，先解除注册
 		if (this.adapters.has(taskId)) {
+			this.log("Task already registered, unregistering first", { taskId })
 			this.unregisterTask(taskId)
 		}
 
@@ -158,15 +213,25 @@ export class TaskEventListener {
 			...config,
 			enabled: this.isEnabled && config?.enabled !== false,
 		}
+		this.log("Creating adapter with config", {
+			taskId,
+			adapterEnabled: adapterConfig.enabled,
+			autoNotify: adapterConfig.autoNotify,
+		})
 
 		const adapter = new TaskNotificationAdapter(adapterConfig)
 
 		// 设置全局事件转发
 		adapter.on("*", (eventData) => {
+			this.log("Global event received from adapter", {
+				taskId,
+				event: eventData.event,
+			})
 			this.forwardToGlobalListeners(taskId, eventData)
 		})
 
 		// 附加到任务
+		this.log("Attaching adapter to task", { taskId })
 		adapter.attach(task)
 
 		// 保存适配器信息
@@ -174,6 +239,11 @@ export class TaskEventListener {
 			taskId,
 			adapter,
 			createdAt: Date.now(),
+		})
+
+		this.log("Task registered successfully", {
+			taskId,
+			totalRegisteredTasks: this.adapters.size,
 		})
 
 		return adapter

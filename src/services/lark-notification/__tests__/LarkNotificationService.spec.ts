@@ -322,7 +322,205 @@ describe("LarkNotificationService", () => {
 			const result = await service.notifyTaskCreated(data)
 
 			expect(result.success).toBe(false)
-			expect(result.error).toContain("Webhook URL not configured")
+			expect(result.error).toContain("No notification method configured")
+		})
+	})
+
+	describe("应用机器人发送", () => {
+		it("应该通过应用机器人成功发送通知", async () => {
+			const service = LarkNotificationService.getInstance()
+			await service.initialize(
+				{
+					useMcp: false,
+					botType: "app" as any,
+					appBot: {
+						appId: "test-app-id",
+						appSecret: "test-app-secret",
+						chatId: "test-chat-id",
+					},
+					enabled: true,
+					retryCount: 1,
+				},
+				false,
+			)
+
+			// Mock token 请求
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({
+						code: 0,
+						tenant_access_token: "test-token",
+						expire: 7200,
+					}),
+				} as Response)
+				// Mock 发送消息请求
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({
+						code: 0,
+						data: { message_id: "app-msg-123" },
+					}),
+				} as Response)
+
+			const data: TaskNotificationData = {
+				taskId: "task-001",
+				taskName: "Test Task",
+				status: TaskNotificationStatus.CREATED,
+				timestamp: Date.now(),
+			}
+
+			const result = await service.notifyTaskCreated(data)
+
+			expect(result.success).toBe(true)
+			expect(result.messageId).toBe("app-msg-123")
+			expect(mockFetch).toHaveBeenCalledTimes(2)
+		})
+
+		it("获取 token 失败时应该返回错误", async () => {
+			const service = LarkNotificationService.getInstance()
+			await service.initialize(
+				{
+					useMcp: false,
+					botType: "app" as any,
+					appBot: {
+						appId: "test-app-id",
+						appSecret: "test-app-secret",
+						chatId: "test-chat-id",
+					},
+					enabled: true,
+					retryCount: 1,
+				},
+				false,
+			)
+
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({
+					code: 99991663,
+					msg: "app_id or app_secret error",
+				}),
+			} as Response)
+
+			const data: TaskNotificationData = {
+				taskId: "task-001",
+				taskName: "Test Task",
+				status: TaskNotificationStatus.CREATED,
+				timestamp: Date.now(),
+			}
+
+			const result = await service.notifyTaskCreated(data)
+
+			expect(result.success).toBe(false)
+			expect(result.error).toContain("Lark auth error")
+		})
+
+		it("发送消息失败时应该返回错误", async () => {
+			const service = LarkNotificationService.getInstance()
+			await service.initialize(
+				{
+					useMcp: false,
+					botType: "app" as any,
+					appBot: {
+						appId: "test-app-id",
+						appSecret: "test-app-secret",
+						chatId: "test-chat-id",
+					},
+					enabled: true,
+					retryCount: 1,
+				},
+				false,
+			)
+
+			// Mock token 请求成功
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({
+						code: 0,
+						tenant_access_token: "test-token",
+						expire: 7200,
+					}),
+				} as Response)
+				// Mock 发送消息失败
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({
+						code: 230001,
+						msg: "chat not found",
+					}),
+				} as Response)
+
+			const data: TaskNotificationData = {
+				taskId: "task-001",
+				taskName: "Test Task",
+				status: TaskNotificationStatus.CREATED,
+				timestamp: Date.now(),
+			}
+
+			const result = await service.notifyTaskCreated(data)
+
+			expect(result.success).toBe(false)
+			expect(result.error).toContain("Lark API error")
+		})
+
+		it("应该缓存 token 并复用", async () => {
+			const service = LarkNotificationService.getInstance()
+			await service.initialize(
+				{
+					useMcp: false,
+					botType: "app" as any,
+					appBot: {
+						appId: "test-app-id",
+						appSecret: "test-app-secret",
+						chatId: "test-chat-id",
+					},
+					enabled: true,
+					retryCount: 1,
+				},
+				false,
+			)
+
+			// 第一次请求：获取 token + 发送消息
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({
+						code: 0,
+						tenant_access_token: "test-token",
+						expire: 7200,
+					}),
+				} as Response)
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({
+						code: 0,
+						data: { message_id: "msg-1" },
+					}),
+				} as Response)
+				// 第二次请求：只发送消息（复用 token）
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({
+						code: 0,
+						data: { message_id: "msg-2" },
+					}),
+				} as Response)
+
+			const data: TaskNotificationData = {
+				taskId: "task-001",
+				taskName: "Test Task",
+				status: TaskNotificationStatus.CREATED,
+				timestamp: Date.now(),
+			}
+
+			// 第一次发送
+			await service.notifyTaskCreated(data)
+			// 第二次发送（应该复用 token）
+			await service.notifyTaskProgress({ ...data, status: TaskNotificationStatus.IN_PROGRESS })
+
+			// 应该只请求一次 token（2 次 token + 2 次消息 = 3 次，因为第二次复用 token）
+			expect(mockFetch).toHaveBeenCalledTimes(3)
 		})
 	})
 
